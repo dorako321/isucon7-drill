@@ -102,7 +102,7 @@ type User struct {
 
 func getUser(userID int64) (*User, error) {
 	u := User{}
-	if err := db.Get(&u, "SELECT * FROM user WHERE id = ?", userID); err != nil {
+	if err := db.Get(&u, "SELECT id, name, salt, password, display_name, avatar_icon, created_at FROM user WHERE id = ?", userID); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -131,7 +131,7 @@ type Message struct {
 
 func queryMessages(chanID, lastID int64) ([]Message, error) {
 	msgs := []Message{}
-	err := db.Select(&msgs, "SELECT * FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100",
+	err := db.Select(&msgs, "SELECT id, channel_id, user_id, content, created_at FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100",
 		lastID, chanID)
 	return msgs, err
 }
@@ -211,7 +211,7 @@ func register(name, password string) (int64, error) {
 
 func getInitialize(c echo.Context) error {
 	db.MustExec("DELETE FROM user WHERE id > 1000")
-	db.MustExec("DELETE FROM image WHERE id > 1001")
+	//db.MustExec("DELETE FROM image WHERE id > 1001")
 	db.MustExec("DELETE FROM channel WHERE id > 10")
 	db.MustExec("DELETE FROM message WHERE id > 10000")
 	db.MustExec("DELETE FROM haveread")
@@ -247,7 +247,7 @@ func getChannel(c echo.Context) error {
 		return err
 	}
 	channels := []ChannelInfo{}
-	err = db.Select(&channels, "SELECT * FROM channel ORDER BY id")
+	err = db.Select(&channels, "SELECT id, name, description, updated_at, created_at FROM channel ORDER BY id")
 	if err != nil {
 		return err
 	}
@@ -310,7 +310,7 @@ func postLogin(c echo.Context) error {
 	}
 
 	var user User
-	err := db.Get(&user, "SELECT * FROM user WHERE name = ?", name)
+	err := db.Get(&user, "SELECT id, name, salt, password, display_name, avatar_icon, created_at FROM user WHERE name = ?", name)
 	if err == sql.ErrNoRows {
 		return echo.ErrForbidden
 	} else if err != nil {
@@ -515,7 +515,7 @@ func getHistory(c echo.Context) error {
 
 	messages := []Message{}
 	err = db.Select(&messages,
-		"SELECT * FROM message WHERE channel_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+		"SELECT id, channel_id, user_id, content, created_at FROM message WHERE channel_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
 		chID, N, (page-1)*N)
 	if err != nil {
 		return err
@@ -531,7 +531,7 @@ func getHistory(c echo.Context) error {
 	}
 
 	channels := []ChannelInfo{}
-	err = db.Select(&channels, "SELECT * FROM channel ORDER BY id")
+	err = db.Select(&channels, "SELECT id, name, description, updated_at, created_at FROM channel ORDER BY id")
 	if err != nil {
 		return err
 	}
@@ -553,14 +553,14 @@ func getProfile(c echo.Context) error {
 	}
 
 	channels := []ChannelInfo{}
-	err = db.Select(&channels, "SELECT * FROM channel ORDER BY id")
+	err = db.Select(&channels, "SELECT id, name, description, updated_at, created_at FROM channel ORDER BY id")
 	if err != nil {
 		return err
 	}
 
 	userName := c.Param("user_name")
 	var other User
-	err = db.Get(&other, "SELECT * FROM user WHERE name = ?", userName)
+	err = db.Get(&other, "SELECT id, name, salt, password, display_name, avatar_icon, created_at FROM user WHERE name = ?", userName)
 	if err == sql.ErrNoRows {
 		return echo.ErrNotFound
 	}
@@ -584,7 +584,7 @@ func getAddChannel(c echo.Context) error {
 	}
 
 	channels := []ChannelInfo{}
-	err = db.Select(&channels, "SELECT * FROM channel ORDER BY id")
+	err = db.Select(&channels, "SELECT id, name, description, updated_at, created_at FROM channel ORDER BY id")
 	if err != nil {
 		return err
 	}
@@ -680,32 +680,6 @@ func postProfile(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/")
 }
 
-func getIcon(c echo.Context) error {
-	var name string
-	var data []byte
-	err := db.QueryRow("SELECT name, data FROM image WHERE name = ?",
-		c.Param("file_name")).Scan(&name, &data)
-	if err == sql.ErrNoRows {
-		return echo.ErrNotFound
-	}
-	if err != nil {
-		return err
-	}
-
-	mime := ""
-	switch true {
-	case strings.HasSuffix(name, ".jpg"), strings.HasSuffix(name, ".jpeg"):
-		mime = "image/jpeg"
-	case strings.HasSuffix(name, ".png"):
-		mime = "image/png"
-	case strings.HasSuffix(name, ".gif"):
-		mime = "image/gif"
-	default:
-		return echo.ErrNotFound
-	}
-	return c.Blob(http.StatusOK, mime, data)
-}
-
 func tAdd(a, b int64) int64 {
 	return a + b
 }
@@ -756,7 +730,6 @@ func main() {
 
 	e.GET("add_channel", getAddChannel)
 	e.POST("add_channel", postAddChannel)
-	e.GET("/icons/:file_name", getIcon)
 
 	e.Start(":5000")
 }
