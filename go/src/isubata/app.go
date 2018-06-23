@@ -25,7 +25,6 @@ import (
 	"github.com/labstack/echo/middleware"
 
 	_ "net/http/pprof"
-	
 )
 
 const (
@@ -39,6 +38,11 @@ var (
 
 type Renderer struct {
 	templates *template.Template
+}
+
+type HaveRead struct {
+	ChannelID int64     `db:"channel_id"`
+	MessageID int64     `db:"message_id"`
 }
 
 func (r *Renderer) Render(w io.Writer, name string, data interface{}, c echo.Context) error {
@@ -418,25 +422,19 @@ func queryChannels() ([]int64, error) {
 	return res, err
 }
 
-func queryHaveRead(userID, chID int64) (int64, error) {
-	type HaveRead struct {
-		UserID    int64     `db:"user_id"`
-		ChannelID int64     `db:"channel_id"`
-		MessageID int64     `db:"message_id"`
-		UpdatedAt time.Time `db:"updated_at"`
-		CreatedAt time.Time `db:"created_at"`
-	}
-	h := HaveRead{}
+func queryHaveRead(userID int64) ([]HaveRead, error) {
 
-	err := db.Get(&h, "SELECT * FROM haveread WHERE user_id = ? AND channel_id = ?",
-		userID, chID)
+	h := []HaveRead{}
+
+	err := db.Select(&h, "SELECT c.id as channel_id, IFNULL(h.message_id, 0) as message_id FROM channel c LEFT OUTER JOIN haveread h ON c.id = h.channel_id and h.user_id = ?",
+		userID)
 
 	if err == sql.ErrNoRows {
-		return 0, nil
+		return h, nil
 	} else if err != nil {
-		return 0, err
+		return h, err
 	}
-	return h.MessageID, nil
+	return h, nil
 }
 
 func fetchUnread(c echo.Context) error {
@@ -447,34 +445,31 @@ func fetchUnread(c echo.Context) error {
 
 	time.Sleep(time.Second)
 
-	channels, err := queryChannels()
+	haveread, err := queryHaveRead(userID)
 	if err != nil {
 		return err
 	}
 
 	resp := []map[string]interface{}{}
 
-	for _, chID := range channels {
-		lastID, err := queryHaveRead(userID, chID)
-		if err != nil {
-			return err
-		}
+	for _, hr := range haveread {
 
 		var cnt int64
-		if lastID > 0 {
+
+		if hr.MessageID > 0 {
 			err = db.Get(&cnt,
 				"SELECT COUNT(*) as cnt FROM message WHERE channel_id = ? AND ? < id",
-				chID, lastID)
+				hr.ChannelID, hr.MessageID)
 		} else {
 			err = db.Get(&cnt,
 				"SELECT COUNT(*) as cnt FROM message WHERE channel_id = ?",
-				chID)
+				hr.ChannelID)
 		}
 		if err != nil {
 			return err
 		}
 		r := map[string]interface{}{
-			"channel_id": chID,
+			"channel_id": hr.ChannelID,
 			"unread":     cnt}
 		resp = append(resp, r)
 	}
@@ -727,7 +722,6 @@ func main() {
 	go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
-
 
 	e := echo.New()
 	funcs := template.FuncMap{
