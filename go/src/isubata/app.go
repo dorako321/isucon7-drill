@@ -85,7 +85,7 @@ func init() {
 		time.Sleep(time.Second * 3)
 	}
 
-	db.SetMaxOpenConns(20)
+	db.SetMaxOpenConns(100)
 	db.SetConnMaxLifetime(5 * time.Minute)
 	log.Printf("Succeeded to connect db.")
 }
@@ -373,6 +373,16 @@ func jsonifyMessage(m Message) (map[string]interface{}, error) {
 	return r, nil
 }
 
+type CMessage struct {
+	ID        int64     `db:"id"`
+	UserID    int64     `db:"user_id"`
+	Content   string    `db:"content"`
+	CreatedAt time.Time `db:"created_at"`
+	AvatarIcon string   `db:"avatar_icon"`
+	Name      string    `db:"name"`
+	DisplayName string  `db:"display_name"`
+}
+
 func getMessage(c echo.Context) error {
 	userID := sessUserID(c)
 	if userID == 0 {
@@ -388,18 +398,35 @@ func getMessage(c echo.Context) error {
 		return err
 	}
 
-	messages, err := queryMessages(chanID, lastID)
-	if err != nil {
-		return err
-	}
+	//messages, err := queryMessages(chanID, lastID)
+	//if err != nil {
+	//	return err
+	//}
+	messages := []CMessage{}
+	db.Select(&messages, "SELECT m.id as id, m.user_id as user_id, m.content as content, m.created_at as created_at, u.avatar_icon as avatar_icon, u.name as name, u.display_name as display_name FROM message m inner join user u on m.user_id = u.id  WHERE m.id > ? AND m.channel_id = ? ORDER BY id DESC LIMIT 100",
+		lastID, chanID)
+
+
 
 	response := make([]map[string]interface{}, 0)
 	for i := len(messages) - 1; i >= 0; i-- {
 		m := messages[i]
-		r, err := jsonifyMessage(m)
-		if err != nil {
-			return err
-		}
+
+		user := User{}
+		user.Name = m.Name
+		user.AvatarIcon = m.AvatarIcon
+		user.DisplayName = m.DisplayName
+
+		r := make(map[string]interface{})
+		r["id"] = m.ID
+		r["user"] = user
+		r["date"] = m.CreatedAt.Format("2006/01/02 15:04:05")
+		r["content"] = m.Content
+		//r, err := jsonifyMessage(m)
+		//if err != nil {
+		//	return err
+		//}
+
 		response = append(response, r)
 	}
 
@@ -458,6 +485,8 @@ func fetchUnread(c echo.Context) error {
 		resp = append(resp, r)
 	}
 
+	time.Sleep(time.Second)
+
 	return c.JSON(http.StatusOK, resp)
 }
 
@@ -485,7 +514,7 @@ func getHistory(c echo.Context) error {
 
 	const N = 20
 	var cnt int64
-	err = db.Get(&cnt, "SELECT COUNT(*) as cnt FROM message WHERE channel_id = ?", chID)
+	err = db.Get(&cnt, "SELECT COUNT(id) as cnt FROM message WHERE channel_id = ?", chID)
 	if err != nil {
 		return err
 	}
