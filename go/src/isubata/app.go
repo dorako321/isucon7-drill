@@ -42,7 +42,7 @@ type Renderer struct {
 
 type HaveRead struct {
 	ChannelID int64     `db:"channel_id"`
-	MessageID int64     `db:"message_id"`
+	Cnt int64     `db:"cnt"`
 }
 
 func (r *Renderer) Render(w io.Writer, name string, data interface{}, c echo.Context) error {
@@ -426,7 +426,7 @@ func queryHaveRead(userID int64) ([]HaveRead, error) {
 
 	h := []HaveRead{}
 
-	err := db.Select(&h, "SELECT c.id as channel_id, IFNULL(h.message_id, 0) as message_id FROM channel c LEFT OUTER JOIN haveread h ON c.id = h.channel_id and h.user_id = ?",
+	err := db.Select(&h, "select ch.channel_id, count(m.channel_id) as cnt from (SELECT c.id as channel_id, IFNULL(h.message_id, 0) as message_id FROM channel c LEFT OUTER JOIN haveread h ON c.id = h.channel_id and h.user_id = ?) ch inner join message m on ch.channel_id = m.channel_id and ch.message_id < id group by m.channel_id",
 		userID)
 
 	if err == sql.ErrNoRows {
@@ -443,8 +443,6 @@ func fetchUnread(c echo.Context) error {
 		return c.NoContent(http.StatusForbidden)
 	}
 
-	time.Sleep(time.Second)
-
 	haveread, err := queryHaveRead(userID)
 	if err != nil {
 		return err
@@ -454,23 +452,9 @@ func fetchUnread(c echo.Context) error {
 
 	for _, hr := range haveread {
 
-		var cnt int64
-
-		if hr.MessageID > 0 {
-			err = db.Get(&cnt,
-				"SELECT COUNT(*) as cnt FROM message WHERE channel_id = ? AND ? < id",
-				hr.ChannelID, hr.MessageID)
-		} else {
-			err = db.Get(&cnt,
-				"SELECT COUNT(*) as cnt FROM message WHERE channel_id = ?",
-				hr.ChannelID)
-		}
-		if err != nil {
-			return err
-		}
 		r := map[string]interface{}{
 			"channel_id": hr.ChannelID,
-			"unread":     cnt}
+			"unread":     hr.Cnt}
 		resp = append(resp, r)
 	}
 
